@@ -1,0 +1,6 @@
+{
+    "configuration": "usb=cdc,speed=32,opt=os",
+    "board": "TleraCorp:stm32l0:Gnat-L082CZ",
+    "port": "/dev/cu.usbmodem0E47314200001",
+    "sketch": "GNAT_X0.ino"
+}
