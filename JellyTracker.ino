@@ -14,14 +14,15 @@
  * 
  */
 
-
 #include <STM32L0.h>  // Management of the STM32L082CZ
-#include <RTC.h>      // Use Real Time Clock features
+#include "RTC.h"      // Use Real Time Clock features
 #include "LIS2DW12.h" // Use accelerometer
 #include "GNSS.h"     // Use GNSS
 
+
 /* >>> What to use ? <<< */
 #define Use_Acc   true 
+
 
 /* >>> STM32 <<< */
 bool STM32_Sleeping = false ;
@@ -37,6 +38,7 @@ int RTC_Timer_count = 0 ;
 /* >>> Sensor connection <<< */
 #define I2C_BUS    Wire               // Define the I2C bus (Wire instance) you wish to use
 I2Cdev             i2c_0(&I2C_BUS);   // Instantiate the I2Cdev object and point to the desired I2C bus
+
 
 /* >>> LIS2DW12 - Accelerometer <<< */
 #if( Use_Acc == true )
@@ -65,30 +67,31 @@ I2Cdev             i2c_0(&I2C_BUS);   // Instantiate the I2Cdev object and point
   LIS2DW12 LIS2DW12(&i2c_0); // instantiate LIS2DW12 class
 #endif
 
+
 /* >>> Serial Println <<< */
 bool Enable_SerialPrint_LED = false ;
 bool Enable_SerialPrint_STM32 = false ;
 bool Enable_SerialPrint_Acc = true ;
 
 
-
+/* >>> Functions <<< */
 
 void STM32_WakeUp( bool Enable_SerialPrint_STM32 ) ;
 void STM32_StopMode( bool Enable_SerialPrint_STM32 ) ;
 void STM32_Temperature( bool Enable_SerialPrint_STM32 ) ;
 
-void Config_Blue_LED( bool Enable_SerialPrint_LED )  ;
-void Turn_Blue_LED_ON( bool Enable_SerialPrint_LED ) ;
-void Turn_Blue_LED_OFF( bool Enable_SerialPrint_LED );
+void BlueLED_Config( bool Enable_SerialPrint_LED )  ;
+void BlueLED_ON( bool Enable_SerialPrint_LED ) ;
+void BlueLED_OFF( bool Enable_SerialPrint_LED );
 
 void RTC_Enable( bool Enable_SerialPrint );
 void RTC_Disable( bool Enable_SerialPrint );
 void RTC_Alarm_Fct_Wakeup() ;
 
-void Config_I2C( ) ;
+void I2C_Config( ) ;
 
 #if( Use_Acc == true )
-  void Config_Acc( bool Enable_SerialPrint_Acc ) ;
+  void Acc_Config( bool Enable_SerialPrint_Acc ) ;
   void Acc_Get_XYZ_Data( bool Enable_SerialPrint_Acc ) ;
   void Acc_Get_Temperature( bool Enable_SerialPrint_Acc ) ;
 #endif
@@ -102,20 +105,20 @@ void setup() {
 
 
   /* >>> BLUE LED <<< */
-  Config_Blue_LED( Enable_SerialPrint_LED ) ;
+  BlueLED_Config( Enable_SerialPrint_LED ) ;
 
 
   // --- Set the RTC time --- //
   RTC_Enable( true ) ;
 
-  Config_I2C( ) ;
+  I2C_Config( ) ;
 
 
 
 
   /* >>> LIS2DW12 - Acc <<< */
   #if( Use_Acc == true )
-    Config_Acc( Enable_SerialPrint_Acc ) ;
+    Acc_Config( Enable_SerialPrint_Acc ) ;
   #endif
 
 
@@ -129,9 +132,9 @@ void loop() {
   
 // put your main code here, to run repeatedly:
   
-//  Turn_Blue_LED_ON( Enable_SerialPrint_LED ) ;
+//  BlueLED_ON( Enable_SerialPrint_LED ) ;
 //  delay(500);
-//  Turn_Blue_LED_OFF( Enable_SerialPrint_LED ); 
+//  BlueLED_OFF( Enable_SerialPrint_LED ); 
 //  delay(500);
 
 //  Serial.println( (String)"STM32L0.resetCause() : " + STM32L0.resetCause() );
@@ -148,10 +151,6 @@ void loop() {
   STM32_StopMode( Enable_SerialPrint_STM32 ) ;
   
 }
-
-
-
-
 
 
 
@@ -192,14 +191,14 @@ void STM32_Temperature( bool Enable_SerialPrint_STM32 ){
 
 /* >>> BLUE LED <<< */
 
-void Config_Blue_LED( bool Enable_SerialPrint_LED ){
+void BlueLED_Config( bool Enable_SerialPrint_LED ){
  
   pinMode(Blue_LED, OUTPUT);      
-  Turn_Blue_LED_ON( Enable_SerialPrint_LED ) ;
+  BlueLED_ON( Enable_SerialPrint_LED ) ;
 
 }
 
-void Turn_Blue_LED_ON( bool Enable_SerialPrint_LED ){
+void BlueLED_ON( bool Enable_SerialPrint_LED ){
  
   digitalWrite(Blue_LED, LOW);
 
@@ -207,7 +206,7 @@ void Turn_Blue_LED_ON( bool Enable_SerialPrint_LED ){
 
 }
 
-void Turn_Blue_LED_OFF( bool Enable_SerialPrint_LED ){
+void BlueLED_OFF( bool Enable_SerialPrint_LED ){
  
   digitalWrite(Blue_LED, HIGH);
 
@@ -221,7 +220,7 @@ void Turn_Blue_LED_OFF( bool Enable_SerialPrint_LED ){
 void RTC_Enable( bool Enable_SerialPrint ){
     // // --- Set the RTC time --- //
   RTC.setAlarmTime(12, 0, 0)                   ; // Setting alarm
-  RTC.enableAlarm(RTC.MATCH_ANY)              ; // Alarm once per second
+  RTC.enableAlarm(RTC.MATCH_Every_10s)         ; // Alarm once per second
   //RTC.enableAlarm(RTC.MATCH_SS)            ; // Alarm once per minute
   RTC.attachInterrupt( RTC_Alarm_Fct_Wakeup ) ; // Alarm interrrupt
   if(Enable_SerialPrint == true ){ Serial.println("RTC enable.") ; };
@@ -249,7 +248,7 @@ void RTC_Alarm_Fct_Wakeup() {
 
 /* >>> Sensor connection <<< */
 
-void Config_I2C( ){
+void I2C_Config( ){
 
     /* initialize two wire bus */
   I2C_BUS.begin();                // Set master mode, default on SDA/SCL for STM32L0
@@ -265,7 +264,7 @@ void Config_I2C( ){
 /* >>> LIS2DW12 - Acc <<< */
 #if( Use_Acc == true )
 
-  void Config_Acc( bool Enable_SerialPrint_Acc ){
+  void Acc_Config( bool Enable_SerialPrint_Acc ){
 
   pinMode(LIS2DW12_intPin1, INPUT);  // define LIS2DW12 wake and sleep interrupt pins as L082 inputs
   pinMode(LIS2DW12_intPin2, INPUT);
