@@ -18,10 +18,12 @@
 #include "RTC.h"      // Use Real Time Clock features
 #include "LIS2DW12.h" // Use accelerometer
 #include "GNSS.h"     // Use GNSS
+//#include "Flash_Page_L0.h"
+
 
 
 /* >>> What to use ? <<< */
-#define Use_Acc   true 
+#define Use_Acc   false 
 
 
 /* >>> STM32 <<< */
@@ -38,6 +40,21 @@ int RTC_Timer_count = 0 ;
 /* >>> Sensor connection <<< */
 #define I2C_BUS    Wire               // Define the I2C bus (Wire instance) you wish to use
 I2Cdev             i2c_0(&I2C_BUS);   // Instantiate the I2Cdev object and point to the desired I2C bus
+
+/* >>> EEPROM <<< */
+uint16_t page_number = 0;     // set the page number for flash page write
+uint8_t  sector_number = 0;   // set the sector number for sector write
+uint8_t  flashPage[256];      // array to hold the data for flash page write
+int EEPROM_address = 0 ;
+
+  uint32_t address = 0x08021980; // adresse de départ de la mémoire flash
+  uint8_t data_pushed[128]; // tableau pour stocker les données lues
+  uint32_t count = 128; // nombre de données à lire
+
+uint8_t data_pulled[128]; // tableau pour stocker les données lues
+
+uint16_t Page_Number = 1075;     // set the page number for flash page write
+uint8_t  Message_Pushed_Count = 0;   // set the sector number for sector write
 
 
 /* >>> LIS2DW12 - Accelerometer <<< */
@@ -68,6 +85,7 @@ I2Cdev             i2c_0(&I2C_BUS);   // Instantiate the I2Cdev object and point
 #endif
 
 
+
 /* >>> Serial Println <<< */
 bool Enable_SerialPrint_LED = false ;
 bool Enable_SerialPrint_STM32 = false ;
@@ -79,6 +97,7 @@ bool Enable_SerialPrint_Acc = true ;
 void STM32_WakeUp( bool Enable_SerialPrint_STM32 ) ;
 void STM32_StopMode( bool Enable_SerialPrint_STM32 ) ;
 void STM32_Temperature( bool Enable_SerialPrint_STM32 ) ;
+void STM32_Flash_Write( bool Enable_SerialPrint_STM32 ) ;
 
 void BlueLED_Config( bool Enable_SerialPrint_LED )  ;
 void BlueLED_ON( bool Enable_SerialPrint_LED ) ;
@@ -96,6 +115,11 @@ void I2C_Config( ) ;
   void Acc_Get_Temperature( bool Enable_SerialPrint_Acc ) ;
 #endif
 
+
+// —————————————————————————————————————————————————————————————————————————————————————————————— //
+//          SETUP()                                                                               //
+// —————————————————————————————————————————————————————————————————————————————————————————————— //
+
 void setup() {
 
   STM32L0.wakeup() ;
@@ -108,7 +132,7 @@ void setup() {
   BlueLED_Config( Enable_SerialPrint_LED ) ;
 
 
-  // --- Set the RTC time --- //
+  /* >>> RTC <<< */
   RTC_Enable( true ) ;
 
   I2C_Config( ) ;
@@ -124,9 +148,15 @@ void setup() {
 
 
 
+
   delay(5000) ;
 
 }
+
+
+// —————————————————————————————————————————————————————————————————————————————————————————————— //
+//          LOOP()                                                                                //
+// —————————————————————————————————————————————————————————————————————————————————————————————— //
 
 void loop() {
   
@@ -141,22 +171,94 @@ void loop() {
 
 //  delay(500) ;
 
+  Serial.println(".") ;
   Serial.println("Your program") ;
   STM32_Temperature( Enable_SerialPrint_STM32 ) ;
+
+  #if( Use_Acc == true )
   Acc_Get_XYZ_Data( Enable_SerialPrint_Acc ) ;
   Acc_Get_Temperature( Enable_SerialPrint_Acc ) ;
+  #endif
+
+  /* >>> EEPROM <<< */
+  /*
+  unsigned long long value = 231232245943999999399999989919929939911 ;
+  for (int i = 0; i < 8; i++) {
+    EEPROM.write(EEPROM_address + i, (value >> (i * 8)) & 0xff);
+  }
+  EEPROM_address = EEPROM_address + 16 ; // 16 * 8 = 128
+
+  Serial.println( (String)"EEPROM_address : " + EEPROM_address ); 
+
+  unsigned long long value1_high = 9223372036854775807ULL; // Partie haute du premier nombre
+  unsigned long long value1_low = 9223372036854775807ULL;  // Partie basse du premier nombre
+  unsigned long long value2_high = 9223372036854775807ULL; // Partie haute du deuxième nombre
+  unsigned long long value2_low = 9223372036854775807ULL;  // Partie basse du deuxième nombre
+
+  // Addition des parties hautes et basses des deux nombres
+  unsigned long long result_low = value1_low + value2_low;
+  unsigned long long result_high = value1_high + value2_high + (result_low < value1_low);
+
+  Serial.print("Result high: ");
+  Serial.println(result_high);
+  Serial.print("Result low: ");
+  Serial.println(result_low);
+
+  */
+
+// https://www.st.com/resource/en/reference_manual/rm0376-ultralowpower-stm32l0x2-advanced-armbased-32bit-mcus-stmicroelectronics.pdf
+// page 62
+
+  int flash_Size = STM32L0.flashSize() ;
+
+  Serial.println( (String)"stm32l0_flash_size : " + flash_Size + "b" ) ;
+
+  Serial.print( "address : " ) ;
+  Serial.println( address , HEX ) ;
+
+  STM32L0.flashUnlock();
+
+  char data_pushed[] = "Hello Hello Hello" ;
+  uint32_t count_datapushed = sizeof(data_pushed);
+
+  // Programme les données en mémoire flash
+  if (STM32L0.flashProgram(address, data_pushed, count_datapushed)) {
+    Serial.println("Données programmées en mémoire flash avec succès");
+  } else {
+    Serial.println("Echec de la programmation en mémoire flash");
+  }
+
+  // Verrouille la mémoire flash pour éviter tout autre accès
+  STM32L0.flashLock();
+
+  // STM32_Flash_Write( Enable_SerialPrint_STM32 ) ;
 
 
-  delay(2000) ;
+  // bool success = STM32L0.flashRead(address, data_pulled, sizeof(data_pulled) );
+
+    // Serial.println("Données lues à partir de la mémoire flash : ");
+    // for (int i = 0; i < sizeof(data_pulled); i++) {
+    //     Serial.print(data_pulled[i], BIN);
+    //     Serial.print(" ");
+    // }
+    // Serial.println();
+
+//  address = address + 0x80 ; // One page = 128bytes so add 128 to change page
+
+
+
+  Serial.println("Fin loop") ;
+
+  // delay(2000) ;
   STM32_StopMode( Enable_SerialPrint_STM32 ) ;
   
 }
 
 
 
-
-
-
+// —————————————————————————————————————————————————————————————————————————————————————————————— //
+//          FUNCTIONS                                                                             //
+// —————————————————————————————————————————————————————————————————————————————————————————————— //
 
 /* >>> STM32 <<< */
 
@@ -185,6 +287,82 @@ void STM32_Temperature( bool Enable_SerialPrint_STM32 ){
   STM32_Temperature_float = STM32L0.getTemperature() ;
 
   if( Enable_SerialPrint_STM32 == true ){ Serial.println( (String)"STM32 : STM32_Temperature : " + STM32_Temperature_float + "°" ); }
+
+}
+
+void STM32_Flash_Write( bool Enable_SerialPrint_STM32 ){
+
+  uint32_t STM32_Flash_address = 0x8021980 ; 
+
+  /*
+   * Corresponds to the address on the 1075th page. We start writing from here. We will use 30% of the flash memory. Be careful not to write.
+   *
+   * This value corresponds to the address of the 1075th page. The flash memory of the STM32L082CZ is 196kbytes. 
+   * It starts at address 0x80000000 and ends at address 0x8020FFFF.  There are 1535 pages, each offering 128bytes per page, i.e. 1024bits per page. 
+   * So there is a total of 1568kBytes available on the flash. When the code is uploaded, it is stored on the flash and therefore takes up space. 
+   * For example, it can take up 25% of the flash. So there is 75% unused space. This space can be used to store data.
+   * 
+   * In this code, we will use 30% of the flash, which is 460 pages or 58,944Bytes or 471,552bits. 
+   * To make sure we don't write our data on the code, we start at address 0x8021980 which corresponds to page number 1075. 
+   * 
+   * The memory allocation is done as follows:
+   * 
+   * 0% –––––––––––––––––––––––––––> 69% | 70% ––––––––––––––––––––> 100%
+   * .  Code implemented on the card     |     Memory space for data
+   * 
+  */
+
+  if (Message_Pushed_Count < 2 && page_number < 1536) {                          // 32,768 256-byte pages in a 8 MByte flash
+
+    data_pushed[ Message_Pushed_Count + 0 ] = 2302081615  ; // Date
+    data_pushed[ Message_Pushed_Count + 1 ] = 43000000    ; // Latitude
+    data_pushed[ Message_Pushed_Count + 2 ] = 3000000     ; // Longitude
+    data_pushed[ Message_Pushed_Count + 3 ] = 10          ; // Nb of satellites
+    data_pushed[ Message_Pushed_Count + 4 ] = 000         ; // Acc x
+    data_pushed[ Message_Pushed_Count + 5 ] = 001         ; // Acc y 
+    data_pushed[ Message_Pushed_Count + 6 ] = 002         ; // Acc z
+    data_pushed[ Message_Pushed_Count + 7 ] = 234         ; // Temperature
+    data_pushed[ Message_Pushed_Count + 8 ] = 11          ; // LoRa satus
+
+    Message_Pushed_Count ++ ;
+
+  }
+
+  else if (Message_Pushed_Count == 2 && page_number < 1536) { // if 8 number of msg or nbr of pages available
+      
+    // Unlocks the flash memory so that it can be programmed
+    STM32L0.flashUnlock();
+
+    // Program the data into flash memory
+    if( STM32L0.flashProgram(address, data_pushed, sizeof(data_pushed) ) ) { Serial.println("Données programmées en mémoire flash avec succès"); } 
+    else { Serial.println("Echec de la programmation en mémoire flash") ; }
+
+    // Verrouille la mémoire flash pour éviter tout autre accès
+    STM32L0.flashLock();
+
+    // Display a msg for each data wrote into the SPI flash
+    Serial.println( "STM32 Flash: Data wrote." ) ;
+
+    Message_Pushed_Count = 0 ; // Reset number of msg put into the page
+    STM32_Flash_address = STM32_Flash_address + 0x80 ; // Increment the page number
+      
+  }
+    
+  else { Serial.println("Reached last page of flash memory !"); Serial.println("Data logging stopped!"); } // Max page reached
+
+
+  // // Unlocks the flash memory so that it can be programmed
+  // STM32L0.flashUnlock();
+
+  // // Program the data into flash memory
+  // if (STM32L0.flashProgram(address, data_pushed, sizeof(datapushed)) {
+  //   Serial.println("Données programmées en mémoire flash avec succès");
+  // } else {
+  //   Serial.println("Echec de la programmation en mémoire flash");
+  // }
+
+  // // Verrouille la mémoire flash pour éviter tout autre accès
+  // STM32L0.flashLock();
 
 }
 
@@ -245,6 +423,10 @@ void RTC_Alarm_Fct_Wakeup() {
   //Serial.println("RTC: Flag timer true");
 }
 
+
+void EEPROM_Size( bool Enable_SerialPrint_EEPROM ){
+
+}
 
 /* >>> Sensor connection <<< */
 
