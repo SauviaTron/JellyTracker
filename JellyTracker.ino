@@ -14,17 +14,17 @@
  * 
  */
 
-#include <STM32L0.h>  // Management of the STM32L082CZ
+#include "src/STM32L0_Custom.h"  // Management of the STM32L082CZ
 #include "RTC.h"      // Use Real Time Clock features
 #include "LIS2DW12.h" // Use accelerometer
-#include "GNSS.h"     // Use GNSS
-//#include "Flash_Page_L0.h"
+#include "GNSS.h"
+#include "src/Flash_ReadWrite.h" // Memory
 
 
 
 /* >>> What to use ? <<< */
 #define Use_Acc   false 
-
+#define Use_GPS   true
 
 /* >>> STM32 <<< */
 bool STM32_Sleeping = false ;
@@ -42,19 +42,7 @@ int RTC_Timer_count = 0 ;
 I2Cdev             i2c_0(&I2C_BUS);   // Instantiate the I2Cdev object and point to the desired I2C bus
 
 /* >>> EEPROM <<< */
-uint16_t page_number = 0;     // set the page number for flash page write
-uint8_t  sector_number = 0;   // set the sector number for sector write
-uint8_t  flashPage[256];      // array to hold the data for flash page write
-int EEPROM_address = 0 ;
 
-  uint32_t address = 0x08021980; // adresse de départ de la mémoire flash
-  uint8_t data_pushed[128]; // tableau pour stocker les données lues
-  uint32_t count = 128; // nombre de données à lire
-
-uint8_t data_pulled[128]; // tableau pour stocker les données lues
-
-uint16_t Page_Number = 1075;     // set the page number for flash page write
-uint8_t  Message_Pushed_Count = 0;   // set the sector number for sector write
 
 
 /* >>> LIS2DW12 - Accelerometer <<< */
@@ -85,11 +73,37 @@ uint8_t  Message_Pushed_Count = 0;   // set the sector number for sector write
 #endif
 
 
+/* >>> MAX M8Q - GPS <<< */
+#if( Use_GPS == true )
+
+
+GNSSLocation myLocation;
+GNSSSatellites mySatellites;
+// MAX M8Q GNSS configuration
+#define GNSS_en      5     // enable for GNSS 3.0 V LDO
+#define pps          4     // 1 Hz fix pulse
+#define GNSS_backup A0     // RTC backup for MAX M8Q
+
+uint16_t Hour = 1, Minute = 1, Second = 1, Millisec, Year = 1, Month = 1, Day = 1;
+uint8_t hours = 12, minutes = 0, seconds = 0, year = 1, month = 1, day = 1;
+uint32_t subSeconds, milliseconds;
+volatile bool ppsFlag = false, firstSync = false, alarmFlag = true;
+uint16_t count = 0, fixType = 0, fixQuality;
+int32_t latOut, longOut;
+
+float Temperature, Long, Lat, Alt, EHPE;
+
+static const char *fixTypeString[] = { "NONE", "TIME", "2D", "3D" };
+static const char *fixQualityString[] = { "", "", "/DIFFERENTIAL", "/PRECISE", "/RTK_FIXED", "/RTK_FLOAT", "/ESTIMATED", "/MANUAL", "/SIMULATION" };
+
+#endif
+
 
 /* >>> Serial Println <<< */
-bool Enable_SerialPrint_LED = false ;
-bool Enable_SerialPrint_STM32 = false ;
-bool Enable_SerialPrint_Acc = true ;
+bool Enable_SerialPrint_LED   = false   ;
+bool Enable_SerialPrint_STM32 = false   ;
+bool Enable_SerialPrint_Acc   = true    ;
+bool Enable_SerialPrint_GPS   = true    ;
 
 
 /* >>> Functions <<< */
@@ -115,6 +129,10 @@ void I2C_Config( ) ;
   void Acc_Get_Temperature( bool Enable_SerialPrint_Acc ) ;
 #endif
 
+#if( Use_GPS == true )
+  void GPS_Config( bool Enable_SerialPrint_GPS ) ;
+  void GPS_ReadUpdate( bool Enable_SerialPrint_GPS ) ;
+#endif
 
 // —————————————————————————————————————————————————————————————————————————————————————————————— //
 //          SETUP()                                                                               //
@@ -146,7 +164,9 @@ void setup() {
   #endif
 
 
-
+  #if( Use_GPS == true )
+    GPS_Config( Enable_SerialPrint_GPS ) ;
+  #endif
 
 
   delay(5000) ;
@@ -171,7 +191,7 @@ void loop() {
 
 //  delay(500) ;
 
-  Serial.println(".") ;
+  Serial.println("...") ;
   Serial.println("Your program") ;
   STM32_Temperature( Enable_SerialPrint_STM32 ) ;
 
@@ -209,43 +229,10 @@ void loop() {
 // https://www.st.com/resource/en/reference_manual/rm0376-ultralowpower-stm32l0x2-advanced-armbased-32bit-mcus-stmicroelectronics.pdf
 // page 62
 
-  int flash_Size = STM32L0.flashSize() ;
 
-  Serial.println( (String)"stm32l0_flash_size : " + flash_Size + "b" ) ;
-
-  Serial.print( "address : " ) ;
-  Serial.println( address , HEX ) ;
-
-  STM32L0.flashUnlock();
-
-  char data_pushed[] = "Hello Hello Hello" ;
-  uint32_t count_datapushed = sizeof(data_pushed);
-
-  // Programme les données en mémoire flash
-  if (STM32L0.flashProgram(address, data_pushed, count_datapushed)) {
-    Serial.println("Données programmées en mémoire flash avec succès");
-  } else {
-    Serial.println("Echec de la programmation en mémoire flash");
-  }
-
-  // Verrouille la mémoire flash pour éviter tout autre accès
-  STM32L0.flashLock();
-
-  // STM32_Flash_Write( Enable_SerialPrint_STM32 ) ;
-
-
-  // bool success = STM32L0.flashRead(address, data_pulled, sizeof(data_pulled) );
-
-    // Serial.println("Données lues à partir de la mémoire flash : ");
-    // for (int i = 0; i < sizeof(data_pulled); i++) {
-    //     Serial.print(data_pulled[i], BIN);
-    //     Serial.print(" ");
-    // }
-    // Serial.println();
-
-//  address = address + 0x80 ; // One page = 128bytes so add 128 to change page
-
-
+  #if( Use_GPS == true )
+  GPS_ReadUpdate( Enable_SerialPrint_GPS ) ;
+  #endif
 
   Serial.println("Fin loop") ;
 
@@ -290,81 +277,81 @@ void STM32_Temperature( bool Enable_SerialPrint_STM32 ){
 
 }
 
-void STM32_Flash_Write( bool Enable_SerialPrint_STM32 ){
+// void STM32_Flash_Write( bool Enable_SerialPrint_STM32 ){
 
-  uint32_t STM32_Flash_address = 0x8021980 ; 
+//   uint32_t STM32_Flash_address = 0x8021980 ; 
 
-  /*
-   * Corresponds to the address on the 1075th page. We start writing from here. We will use 30% of the flash memory. Be careful not to write.
-   *
-   * This value corresponds to the address of the 1075th page. The flash memory of the STM32L082CZ is 196kbytes. 
-   * It starts at address 0x80000000 and ends at address 0x8020FFFF.  There are 1535 pages, each offering 128bytes per page, i.e. 1024bits per page. 
-   * So there is a total of 1568kBytes available on the flash. When the code is uploaded, it is stored on the flash and therefore takes up space. 
-   * For example, it can take up 25% of the flash. So there is 75% unused space. This space can be used to store data.
-   * 
-   * In this code, we will use 30% of the flash, which is 460 pages or 58,944Bytes or 471,552bits. 
-   * To make sure we don't write our data on the code, we start at address 0x8021980 which corresponds to page number 1075. 
-   * 
-   * The memory allocation is done as follows:
-   * 
-   * 0% –––––––––––––––––––––––––––> 69% | 70% ––––––––––––––––––––> 100%
-   * .  Code implemented on the card     |     Memory space for data
-   * 
-  */
+//   /*
+//    * Corresponds to the address on the 1075th page. We start writing from here. We will use 30% of the flash memory. Be careful not to write.
+//    *
+//    * This value corresponds to the address of the 1075th page. The flash memory of the STM32L082CZ is 196kbytes. 
+//    * It starts at address 0x80000000 and ends at address 0x8020FFFF.  There are 1535 pages, each offering 128bytes per page, i.e. 1024bits per page. 
+//    * So there is a total of 1568kBytes available on the flash. When the code is uploaded, it is stored on the flash and therefore takes up space. 
+//    * For example, it can take up 25% of the flash. So there is 75% unused space. This space can be used to store data.
+//    * 
+//    * In this code, we will use 30% of the flash, which is 460 pages or 58,944Bytes or 471,552bits. 
+//    * To make sure we don't write our data on the code, we start at address 0x8021980 which corresponds to page number 1075. 
+//    * 
+//    * The memory allocation is done as follows:
+//    * 
+//    * 0% –––––––––––––––––––––––––––> 69% | 70% ––––––––––––––––––––> 100%
+//    * .  Code implemented on the card     |     Memory space for data
+//    * 
+//   */
 
-  if (Message_Pushed_Count < 2 && page_number < 1536) {                          // 32,768 256-byte pages in a 8 MByte flash
+//   if (Message_Pushed_Count < 2 && page_number < 1536) {                          // 32,768 256-byte pages in a 8 MByte flash
 
-    data_pushed[ Message_Pushed_Count + 0 ] = 2302081615  ; // Date
-    data_pushed[ Message_Pushed_Count + 1 ] = 43000000    ; // Latitude
-    data_pushed[ Message_Pushed_Count + 2 ] = 3000000     ; // Longitude
-    data_pushed[ Message_Pushed_Count + 3 ] = 10          ; // Nb of satellites
-    data_pushed[ Message_Pushed_Count + 4 ] = 000         ; // Acc x
-    data_pushed[ Message_Pushed_Count + 5 ] = 001         ; // Acc y 
-    data_pushed[ Message_Pushed_Count + 6 ] = 002         ; // Acc z
-    data_pushed[ Message_Pushed_Count + 7 ] = 234         ; // Temperature
-    data_pushed[ Message_Pushed_Count + 8 ] = 11          ; // LoRa satus
+//     data_pushed[ Message_Pushed_Count + 0 ] = 2302081615  ; // Date
+//     data_pushed[ Message_Pushed_Count + 1 ] = 43000000    ; // Latitude
+//     data_pushed[ Message_Pushed_Count + 2 ] = 3000000     ; // Longitude
+//     data_pushed[ Message_Pushed_Count + 3 ] = 10          ; // Nb of satellites
+//     data_pushed[ Message_Pushed_Count + 4 ] = 000         ; // Acc x
+//     data_pushed[ Message_Pushed_Count + 5 ] = 001         ; // Acc y 
+//     data_pushed[ Message_Pushed_Count + 6 ] = 002         ; // Acc z
+//     data_pushed[ Message_Pushed_Count + 7 ] = 234         ; // Temperature
+//     data_pushed[ Message_Pushed_Count + 8 ] = 11          ; // LoRa satus
 
-    Message_Pushed_Count ++ ;
+//     Message_Pushed_Count ++ ;
 
-  }
+//   }
 
-  else if (Message_Pushed_Count == 2 && page_number < 1536) { // if 8 number of msg or nbr of pages available
+//   else if (Message_Pushed_Count == 2 && page_number < 1536) { // if 8 number of msg or nbr of pages available
       
-    // Unlocks the flash memory so that it can be programmed
-    STM32L0.flashUnlock();
+//     // Unlocks the flash memory so that it can be programmed
+//     STM32L0.flashUnlock();
 
-    // Program the data into flash memory
-    if( STM32L0.flashProgram(address, data_pushed, sizeof(data_pushed) ) ) { Serial.println("Données programmées en mémoire flash avec succès"); } 
-    else { Serial.println("Echec de la programmation en mémoire flash") ; }
+//     // Program the data into flash memory
+//     if( STM32L0.flashProgram(address, data_pushed, sizeof(data_pushed) ) ) { Serial.println("Données programmées en mémoire flash avec succès"); } 
+//     else { Serial.println("Echec de la programmation en mémoire flash") ; }
 
-    // Verrouille la mémoire flash pour éviter tout autre accès
-    STM32L0.flashLock();
+//     // Verrouille la mémoire flash pour éviter tout autre accès
+//     STM32L0.flashLock();
 
-    // Display a msg for each data wrote into the SPI flash
-    Serial.println( "STM32 Flash: Data wrote." ) ;
+//     // Display a msg for each data wrote into the SPI flash
+//     Serial.println( "STM32 Flash: Data wrote." ) ;
 
-    Message_Pushed_Count = 0 ; // Reset number of msg put into the page
-    STM32_Flash_address = STM32_Flash_address + 0x80 ; // Increment the page number
+//     Message_Pushed_Count = 0 ; // Reset number of msg put into the page
+//     STM32_Flash_address = STM32_Flash_address + 0x80 ; // Increment the page number
       
-  }
+//   }
     
-  else { Serial.println("Reached last page of flash memory !"); Serial.println("Data logging stopped!"); } // Max page reached
+//   else { Serial.println("Reached last page of flash memory !"); Serial.println("Data logging stopped!"); } // Max page reached
 
 
-  // // Unlocks the flash memory so that it can be programmed
-  // STM32L0.flashUnlock();
+//   // // Unlocks the flash memory so that it can be programmed
+//   // STM32L0.flashUnlock();
 
-  // // Program the data into flash memory
-  // if (STM32L0.flashProgram(address, data_pushed, sizeof(datapushed)) {
-  //   Serial.println("Données programmées en mémoire flash avec succès");
-  // } else {
-  //   Serial.println("Echec de la programmation en mémoire flash");
-  // }
+//   // // Program the data into flash memory
+//   // if (STM32L0.flashProgram(address, data_pushed, sizeof(datapushed)) {
+//   //   Serial.println("Données programmées en mémoire flash avec succès");
+//   // } else {
+//   //   Serial.println("Echec de la programmation en mémoire flash");
+//   // }
 
-  // // Verrouille la mémoire flash pour éviter tout autre accès
-  // STM32L0.flashLock();
+//   // // Verrouille la mémoire flash pour éviter tout autre accès
+//   // STM32L0.flashLock();
 
-}
+// }
 
 
 /* >>> BLUE LED <<< */
@@ -524,8 +511,84 @@ void I2C_Config( ){
 #endif
 
 
+/* >>> MAX M9Q - GPS <<< */
+#if( Use_GPS == true )
 
+  void GPS_Config( bool Enable_SerialPrint_GPS ){
 
+    pinMode(GNSS_backup, OUTPUT);
+    digitalWrite(GNSS_backup, HIGH);
+
+    /* Initialize and configure GNSS */
+    GNSS.begin(Serial1, GNSS.MODE_UBLOX, GNSS.RATE_1HZ); // Start GNSS
+    while (GNSS.busy()) { } // wait for begin to complete
+
+    GNSS.setConstellation(GNSS.CONSTELLATION_GPS_AND_GLONASS); // choose satellites
+    while (GNSS.busy()) { } // wait for set to complete
+
+    GNSS.setAntenna(GNSS.ANTENNA_EXTERNAL);  
+    while (GNSS.busy()) { } // wait for set to complete
+
+    GNSS.enableWakeup();
+    while (GNSS.busy()) { } // wait for set to complete
+
+  }
+
+  void GPS_ReadUpdate( bool Enable_SerialPrint_GPS ){
+
+    if( GNSS.location(myLocation) ){
+
+      Serial.print( (String)"LOCATION: " + fixTypeString[myLocation.fixType()]) ;
+
+      if (GNSS.satellites(mySatellites)){ Serial.print( (String)" - SATELLITES: " + mySatellites.count()) ; }
+
+      if( myLocation.fixType() != GNSSLocation::TYPE_NONE ){
+
+        Hour   = myLocation.hours()   ;
+        Minute = myLocation.minutes() ;
+        Second = myLocation.seconds() ;
+        Year   = myLocation.year()    ;
+        Month  = myLocation.month()   ;
+        Day    = myLocation.day()     ;
+        
+        Serial.print(fixQualityString[myLocation.fixQuality()]) ; Serial.print(" - ") ;
+
+        Serial.print( Year + (String)"/" + Month + (String)"/" + Day + (String)" " ) ; 
+
+        if(myLocation.hours()   <= 9){ Serial.print("0"); } Serial.print( myLocation.hours()   + (String)":" ); 
+        if(myLocation.minutes() <= 9){ Serial.print("0"); } Serial.print( myLocation.minutes() + (String)":" ); 
+        if(myLocation.seconds() <= 9){ Serial.print("0"); } Serial.print( myLocation.seconds() + (String)" " ); 
+
+        // if( myLocation.leapSeconds() != GNSSLocation::LEAP_SECONDS_UNDEFINED) {
+        //   Serial.print(" ");
+        //   Serial.print(myLocation.leapSeconds());
+        //   if (!myLocation.fullyResolved()){ Serial.print("D") ; }
+        // }
+
+        if( myLocation.fixType() != GNSSLocation::TYPE_TIME ){
+
+          Lat  = myLocation.latitude()  ; myLocation.latitude(latOut);
+          Long = myLocation.longitude() ; myLocation.longitude(longOut);
+          Alt  = myLocation.altitude()  ;
+          EHPE = myLocation.ehpe()      ; // use this as accuracy figure of merit
+
+          Serial.print("- Coord: ");
+          Serial.print(Lat, 7); Serial.print(","); Serial.print(Long, 7); Serial.print(","); Serial.print(Alt, 3);
+          Serial.print(" - EHPE: "); Serial.print(EHPE, 3) ; 
+          Serial.print(" - SATELLITES fixed: "); Serial.print(myLocation.satellites());
+          Serial.println();
+
+        } // if( myLocation.fixType() != GNSSLocation::TYPE_TIME )
+
+      } // if( myLocation.fixType() != GNSSLocation::TYPE_NONE )
+
+      Serial.println();
+
+    } // if( GNSS.location(myLocation) )
+
+  }
+
+#endif
 
 
 
